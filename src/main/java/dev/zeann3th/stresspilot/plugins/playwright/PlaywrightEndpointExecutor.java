@@ -61,7 +61,7 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
                     .responseTimeMs(responseTime)
                     .build();
 
-        } catch (TimeoutException e) {
+        } catch (TimeoutException _) {
             log.error("Playwright script execution timed out for endpoint {}", endpoint.getId());
             return ExecuteEndpointResponse.builder()
                     .success(false)
@@ -89,7 +89,10 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
         log.debug("Starting Playwright Browser instance inside Endpoint Executor...");
 
         try (Playwright playwright = Playwright.create();
-             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                     .setHeadless(false)
+                     .setSlowMo(500))
+             ;
              BrowserContext browserContext = browser.newContext();
              Page page = browserContext.newPage()) {
 
