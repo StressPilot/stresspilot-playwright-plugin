@@ -29,6 +29,32 @@ import java.util.concurrent.*;
 @Component
 public class PlaywrightEndpointExecutor implements EndpointExecutor {
 
+    private static final String JS_PAGE_WRAPPER = """
+            const page = {
+                goto:            (url)       => __page__.gotoUrl(url),
+                navigate:        (url)       => __page__.gotoUrl(url),
+                url:             ()          => __page__.url(),
+                title:           ()          => __page__.title(),
+                textContent:     (sel)       => __page__.textContent(sel),
+                innerText:       (sel)       => __page__.innerText(sel),
+                content:         ()          => __page__.content(),
+                getAttribute:    (sel, attr) => __page__.getAttribute(sel, attr),
+                isVisible:       (sel)       => __page__.isVisible(sel),
+                exists:          (sel)       => __page__.exists(sel),
+                click:           (sel)       => __page__.click(sel),
+                dblclick:        (sel)       => __page__.dblclick(sel),
+                hover:           (sel)       => __page__.hover(sel),
+                fill:            (sel, val)  => __page__.fill(sel, val),
+                selectOption:    (sel, val)  => __page__.selectOption(sel, val),
+                check:           (sel)       => __page__.check(sel),
+                uncheck:         (sel)       => __page__.uncheck(sel),
+                press:           (sel, key)  => __page__.press(sel, key),
+                waitForSelector: (sel)       => __page__.waitForSelector(sel),
+                waitForTimeout:  (ms)        => __page__.waitForTimeout(ms),
+                screenshot:      ()          => __page__.screenshot(),
+            };
+            """;
+
     @Override
     public String getType() {
         return "PLAYWRIGHT";
@@ -71,7 +97,7 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
                     .build();
 
         } catch (Exception e) {
-            log.error("Playwright Execution failed for endpoint {}", endpoint.getId(), e);
+            log.error("Playwright execution failed for endpoint {}", endpoint.getId(), e);
             return ExecuteEndpointResponse.builder()
                     .success(false)
                     .statusCode(500)
@@ -109,24 +135,16 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
                             .allowHostClassLookup(_ -> false)
                             .build()) {
 
-                        jsContext.getBindings("js").putMember("page", safeProxy);
+                        // Inject the Java proxy under a private name, then expose
+                        // a clean JS object with all the expected method names.
+                        jsContext.getBindings("js").putMember("__page__", safeProxy);
                         jsContext.getBindings("js").putMember("env", ProxyObject.fromMap(envVars));
-
-                        jsContext.eval("js", "page.goto = function(url) { page.gotoUrl(url); };");
+                        jsContext.eval("js", JS_PAGE_WRAPPER);
 
                         try {
                             jsContext.eval("js", jsScript);
                         } catch (PolyglotException e) {
-                            try {
-                                log.warn("Playwright script failed. Capturing crash screenshot...");
-                                byte[] buffer = page.screenshot(new Page.ScreenshotOptions()
-                                        .setType(com.microsoft.playwright.options.ScreenshotType.JPEG)
-                                        .setQuality(70));
-
-                                envVars.put("errorScreenshot", java.util.Base64.getEncoder().encodeToString(buffer));
-                            } catch (Exception screenshotEx) {
-                                log.error("Failed to capture screenshot during crash", screenshotEx);
-                            }
+                            captureErrorScreenshot(page, envVars);
                             throw new RuntimeException(e.getMessage());
                         }
                     }
@@ -148,6 +166,18 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
                         Map.of(Constants.REASON, "GraalVM JS Evaluation Error: " + e.getCause().getMessage())
                 );
             }
+        }
+    }
+
+    private void captureErrorScreenshot(Page page, Map<String, Object> envVars) {
+        try {
+            log.warn("Playwright script failed. Capturing crash screenshot...");
+            byte[] buffer = page.screenshot(new Page.ScreenshotOptions()
+                    .setType(com.microsoft.playwright.options.ScreenshotType.JPEG)
+                    .setQuality(70));
+            envVars.put("errorScreenshot", java.util.Base64.getEncoder().encodeToString(buffer));
+        } catch (Exception screenshotEx) {
+            log.error("Failed to capture screenshot during crash", screenshotEx);
         }
     }
 }
