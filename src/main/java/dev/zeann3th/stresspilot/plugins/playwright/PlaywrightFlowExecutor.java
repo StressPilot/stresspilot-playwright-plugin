@@ -13,8 +13,8 @@ import dev.zeann3th.stresspilot.core.services.ActiveRunRegistry;
 import dev.zeann3th.stresspilot.core.services.RequestLogService;
 import dev.zeann3th.stresspilot.core.services.executors.context.BaseExecutionContext;
 import dev.zeann3th.stresspilot.core.services.flows.FlowExecutionContext;
+import dev.zeann3th.stresspilot.core.services.flows.FlowExecutor;
 import dev.zeann3th.stresspilot.core.services.flows.nodes.FlowNodeHandlerFactory;
-import dev.zeann3th.stresspilot.core.services.flows.strategies.FlowExecutor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.pf4j.Extension;
@@ -38,6 +38,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PlaywrightFlowExecutor implements FlowExecutor {
 
+    private static final String PLAYWRIGHT = "PLAYWRIGHT";
+
     private final ProjectStore projectStore;
     private final EnvironmentVariableStore envVarStore;
     private final RunStore runStore;
@@ -46,8 +48,13 @@ public class PlaywrightFlowExecutor implements FlowExecutor {
     private final FlowNodeHandlerFactory nodeHandlerFactory;
 
     @Override
+    public String getType() {
+        return PLAYWRIGHT;
+    }
+
+    @Override
     public boolean supports(String type) {
-        return "PLAYWRIGHT".equalsIgnoreCase(type);
+        return PLAYWRIGHT.equalsIgnoreCase(type);
     }
 
     @Override
@@ -173,7 +180,7 @@ public class PlaywrightFlowExecutor implements FlowExecutor {
             FlowStepType type;
             try {
                 type = FlowStepType.valueOf(current.getType().toUpperCase());
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException _) {
                 log.error("Unknown step type: {}", current.getType());
                 break;
             }
