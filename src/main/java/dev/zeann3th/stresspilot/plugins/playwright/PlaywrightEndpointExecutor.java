@@ -88,48 +88,66 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
 
         log.debug("Starting Playwright Browser instance inside Endpoint Executor...");
 
-        try (Playwright playwright = Playwright.create();
-             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                     .setHeadless(false)
-                     .setSlowMo(500))
-             ;
-             BrowserContext browserContext = browser.newContext();
-             Page page = browserContext.newPage()) {
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
 
-            SafePageProxy safeProxy = new SafePageProxy(page);
+            Callable<Void> browserTask = () -> {
+                try (Playwright playwright = Playwright.create();
+                     Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                             .setHeadless(false)
+                             .setSlowMo(500));
+                     BrowserContext browserContext = browser.newContext();
+                     Page page = browserContext.newPage()) {
 
-            try (Context jsContext = Context.newBuilder("js")
-                    .allowHostAccess(secureAccess)
-                    .allowCreateProcess(false)
-                    .allowCreateThread(false)
-                    .allowIO(IOAccess.NONE)
-                    .allowNativeAccess(false)
-                    .allowHostClassLookup(className -> false)
-                    .build()) {
+                    SafePageProxy safeProxy = new SafePageProxy(page);
 
-                jsContext.getBindings("js").putMember("page", safeProxy);
-                jsContext.getBindings("js").putMember("env", ProxyObject.fromMap(envVars));
+                    try (Context jsContext = Context.newBuilder("js")
+                            .allowHostAccess(secureAccess)
+                            .allowCreateProcess(false)
+                            .allowCreateThread(false)
+                            .allowIO(IOAccess.NONE)
+                            .allowNativeAccess(false)
+                            .allowHostClassLookup(_ -> false)
+                            .build()) {
 
-                ExecutorService executor = Executors.newSingleThreadExecutor();
-                Future<?> future = executor.submit(() -> jsContext.eval("js", jsScript));
+                        jsContext.getBindings("js").putMember("page", safeProxy);
+                        jsContext.getBindings("js").putMember("env", ProxyObject.fromMap(envVars));
 
-                try {
-                    future.get(60, TimeUnit.SECONDS);
-                } catch (TimeoutException e) {
-                    future.cancel(true);
-                    jsContext.close(true);
-                    throw e;
-                } finally {
-                    executor.shutdownNow();
+                        jsContext.eval("js", "page.goto = function(url) { page.gotoUrl(url); };");
+
+                        try {
+                            jsContext.eval("js", jsScript);
+                        } catch (PolyglotException e) {
+                            try {
+                                log.warn("Playwright script failed. Capturing crash screenshot...");
+                                byte[] buffer = page.screenshot(new Page.ScreenshotOptions()
+                                        .setType(com.microsoft.playwright.options.ScreenshotType.JPEG)
+                                        .setQuality(70));
+
+                                envVars.put("errorScreenshot", java.util.Base64.getEncoder().encodeToString(buffer));
+                            } catch (Exception screenshotEx) {
+                                log.error("Failed to capture screenshot during crash", screenshotEx);
+                            }
+                            throw new RuntimeException(e.getMessage());
+                        }
+                    }
                 }
+                return null;
+            };
+
+            Future<Void> future = executor.submit(browserTask);
+
+            try {
+                future.get(60, TimeUnit.SECONDS);
+            } catch (TimeoutException _) {
+                future.cancel(true);
+                throw CommandExceptionBuilder.exception(ErrorCode.ER0001,
+                        Map.of(Constants.REASON, "Playwright execution timed out after 60 seconds")
+                );
+            } catch (ExecutionException e) {
+                throw CommandExceptionBuilder.exception(ErrorCode.ER0001,
+                        Map.of(Constants.REASON, "GraalVM JS Evaluation Error: " + e.getCause().getMessage())
+                );
             }
-        } catch (PolyglotException e) {
-            throw CommandExceptionBuilder.exception(ErrorCode.ER0001,
-                    Map.of(
-                            Constants.REASON,
-                            "GraalVM JS Evaluation Error: " + e.getMessage()
-                    )
-            );
         }
     }
 }

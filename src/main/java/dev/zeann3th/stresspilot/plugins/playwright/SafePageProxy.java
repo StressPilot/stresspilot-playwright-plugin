@@ -8,12 +8,8 @@ import java.util.Set;
 
 /**
  * An explicit, allowlisted wrapper around a Playwright Page.
- *
  * Only the methods declared here are callable from sandboxed JS.
  * The real Page object is NEVER injected directly — only this proxy is.
- *
- * All @HostAccess.Export annotations are required — GraalVM will refuse
- * to call any method that doesn't have one.
  */
 public class SafePageProxy {
 
@@ -36,8 +32,9 @@ public class SafePageProxy {
     // Navigation
     // -------------------------------------------------------------------------
 
+    // 'goto' is a Java keyword, so we name the method gotoUrl but export it as "goto" for JS.
     @HostAccess.Export
-    public void navigate(String url) {
+    public void gotoUrl(String url) {
         if (navigationCount >= MAX_NAVIGATIONS) {
             throw new SecurityException("Navigation limit reached (" + MAX_NAVIGATIONS + ")");
         }
@@ -47,7 +44,7 @@ public class SafePageProxy {
     }
 
     @HostAccess.Export
-    public String currentUrl() {
+    public String url() {
         return page.url();
     }
 
@@ -61,15 +58,22 @@ public class SafePageProxy {
     // -------------------------------------------------------------------------
 
     @HostAccess.Export
-    public String getText(String selector) {
+    public String textContent(String selector) {
+        validateSelector(selector);
+        String text = page.locator(selector).first().textContent();
+        return truncate(text);
+    }
+
+    @HostAccess.Export
+    public String innerText(String selector) {
         validateSelector(selector);
         String text = page.locator(selector).first().innerText();
         return truncate(text);
     }
 
     @HostAccess.Export
-    public String getPageText() {
-        String text = page.locator("body").innerText();
+    public String content() {
+        String text = page.content(); // Returns full HTML
         return truncate(text);
     }
 
@@ -86,6 +90,7 @@ public class SafePageProxy {
         return page.locator(selector).first().isVisible();
     }
 
+    // Custom convenience method (not strict Playwright, but highly useful for QA)
     @HostAccess.Export
     public boolean exists(String selector) {
         validateSelector(selector);
@@ -140,7 +145,7 @@ public class SafePageProxy {
     }
 
     @HostAccess.Export
-    public void pressKey(String selector, String key) {
+    public void press(String selector, String key) {
         validateSelector(selector);
         validateKeyName(key);
         page.locator(selector).first().press(key);
@@ -151,8 +156,7 @@ public class SafePageProxy {
     // -------------------------------------------------------------------------
 
     /**
-     * Wait for a selector to appear. Max 15 seconds — users can't pass their own timeout
-     * to prevent them from locking up the thread indefinitely.
+     * Wait for a selector to appear. Max 15 seconds.
      */
     @HostAccess.Export
     public void waitForSelector(String selector) {
@@ -163,18 +167,28 @@ public class SafePageProxy {
     }
 
     /**
-     * Sleep for up to 5 seconds. Prevents abuse as an infinite delay mechanism.
+     * Playwright native wait. Max 5 seconds to prevent thread locking.
      */
     @HostAccess.Export
-    public void sleep(int milliseconds) {
+    public void waitForTimeout(int milliseconds) {
         if (milliseconds < 0 || milliseconds > 5_000) {
-            throw new SecurityException("sleep() must be between 0 and 5000ms");
+            throw new SecurityException("waitForTimeout must be between 0 and 5000ms");
         }
-        try {
-            Thread.sleep(milliseconds);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        page.waitForTimeout(milliseconds);
+    }
+
+    // -------------------------------------------------------------------------
+    // Screenshots
+    // -------------------------------------------------------------------------
+
+    @HostAccess.Export
+    public String screenshot() {
+        byte[] buffer = page.screenshot(new Page.ScreenshotOptions()
+                .setType(com.microsoft.playwright.options.ScreenshotType.JPEG)
+                .setQuality(80)
+                .setFullPage(false));
+
+        return java.util.Base64.getEncoder().encodeToString(buffer);
     }
 
     // -------------------------------------------------------------------------
@@ -185,7 +199,6 @@ public class SafePageProxy {
         if (url == null || url.isBlank()) {
             throw new SecurityException("URL must not be blank");
         }
-        // Block javascript: and data: URIs which could exfiltrate data or run malicious code
         String lower = url.toLowerCase().trim();
         if (lower.startsWith("javascript:") || lower.startsWith("data:") || lower.startsWith("file:")) {
             throw new SecurityException("URL scheme not allowed: " + url);
@@ -205,7 +218,6 @@ public class SafePageProxy {
     }
 
     private void validateAttributeName(String attribute) {
-        // Only allow simple alphanumeric attribute names (e.g., "href", "data-id")
         if (!attribute.matches("[a-zA-Z][a-zA-Z0-9\\-_]*")) {
             throw new SecurityException("Invalid attribute name: " + attribute);
         }
@@ -218,7 +230,6 @@ public class SafePageProxy {
     }
 
     private void validateKeyName(String key) {
-        // Whitelist of allowed keys to prevent weird escape sequences
         Set<String> allowed = Set.of(
                 "Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
                 "Backspace", "Delete", "Home", "End", "PageUp", "PageDown", "Space"
