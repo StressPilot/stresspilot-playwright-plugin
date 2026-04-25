@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>dev.zeann3th.stresspilot.plugins</groupId>
-    <artifactId>playwright</artifactId>
+    <artifactId>stresspilot-playwright-plugin</artifactId>
     <version>1.0.0</version>
 
     <properties>
