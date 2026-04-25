@@ -111,7 +111,7 @@
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <manifestEntries>
-                                        <Plugin-Id>playwright-executor-plugin</Plugin-Id>
+                                        <Plugin-Id>stresspilot-plyawright-plugin</Plugin-Id>
                                         <Plugin-Version>1.0.0</Plugin-Version>
                                         <Plugin-Provider>Zeann3th</Plugin-Provider>
                                         <Plugin-Description>Playwright UI Testing Execution Engine</Plugin-Description>
