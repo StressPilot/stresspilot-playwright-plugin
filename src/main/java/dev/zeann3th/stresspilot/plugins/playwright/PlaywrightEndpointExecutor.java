@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.PolyglotException;
+import org.graalvm.polyglot.Value;
 import org.graalvm.polyglot.io.IOAccess;
 import org.graalvm.polyglot.proxy.ProxyObject;
 import org.pf4j.Extension;
@@ -30,11 +31,47 @@ import java.util.concurrent.*;
 public class PlaywrightEndpointExecutor implements EndpointExecutor {
 
     private static final String JS_PAGE_WRAPPER = """
+            const wrapLocator = (loc) => {
+                if (!loc) return null;
+                return {
+                    click:           ()          => loc.click(),
+                    dblclick:        ()          => loc.dblclick(),
+                    hover:           ()          => loc.hover(),
+                    fill:            (val)       => loc.fill(val),
+                    press:           (key)       => loc.press(key),
+                    check:           ()          => loc.check(),
+                    uncheck:         ()          => loc.uncheck(),
+                    selectOption:    (val)       => loc.selectOption(val),
+                    isVisible:       ()          => loc.isVisible(),
+                    textContent:     ()          => loc.textContent(),
+                    innerText:       ()          => loc.innerText(),
+                    getAttribute:    (name)      => loc.getAttribute(name),
+                    waitFor:         ()          => loc.waitFor(),
+                    count:           ()          => loc.count(),
+                    first:           ()          => wrapLocator(loc.first()),
+                    last:            ()          => wrapLocator(loc.last()),
+                    nth:             (idx)       => wrapLocator(loc.nth(idx)),
+                };
+            };
+
             const page = {
                 goto:            (url)       => __page__.gotoUrl(url),
                 navigate:        (url)       => __page__.gotoUrl(url),
                 url:             ()          => __page__.url(),
                 title:           ()          => __page__.title(),
+                reload:          ()          => __page__.reload(),
+                goBack:          ()          => __page__.goBack(),
+                goForward:       ()          => __page__.goForward(),
+                
+                locator:         (sel)       => wrapLocator(__page__.locator(sel)),
+                getByRole:       (r, n)      => wrapLocator(__page__.getByRole(r, n)),
+                getByText:       (t)         => wrapLocator(__page__.getByText(t)),
+                getByLabel:      (l)         => wrapLocator(__page__.getByLabel(l)),
+                getByPlaceholder:(p)         => wrapLocator(__page__.getByPlaceholder(p)),
+                getByAltText:    (a)         => wrapLocator(__page__.getByAltText(a)),
+                getByTitle:      (t)         => wrapLocator(__page__.getByTitle(t)),
+                getByTestId:     (id)        => wrapLocator(__page__.getByTestId(id)),
+
                 textContent:     (sel)       => __page__.textContent(sel),
                 innerText:       (sel)       => __page__.innerText(sel),
                 content:         ()          => __page__.content(),
@@ -42,15 +79,11 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
                 isVisible:       (sel)       => __page__.isVisible(sel),
                 exists:          (sel)       => __page__.exists(sel),
                 click:           (sel)       => __page__.click(sel),
-                dblclick:        (sel)       => __page__.dblclick(sel),
-                hover:           (sel)       => __page__.hover(sel),
                 fill:            (sel, val)  => __page__.fill(sel, val),
-                selectOption:    (sel, val)  => __page__.selectOption(sel, val),
-                check:           (sel)       => __page__.check(sel),
-                uncheck:         (sel)       => __page__.uncheck(sel),
-                press:           (sel, key)  => __page__.press(sel, key),
+                
                 waitForSelector: (sel)       => __page__.waitForSelector(sel),
                 waitForTimeout:  (ms)        => __page__.waitForTimeout(ms),
+                waitForLoadState:(state)     => __page__.waitForLoadState(state),
                 screenshot:      ()          => __page__.screenshot(),
             };
             """;
@@ -119,8 +152,7 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
             Callable<Void> browserTask = () -> {
                 try (Playwright playwright = Playwright.create();
                      Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                             .setHeadless(false)
-                             .setSlowMo(500));
+                             .setHeadless(true)); // Headless by default for load testing
                      BrowserContext browserContext = browser.newContext();
                      Page page = browserContext.newPage()) {
 
@@ -135,8 +167,6 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
                             .allowHostClassLookup(_ -> false)
                             .build()) {
 
-                        // Inject the Java proxy under a private name, then expose
-                        // a clean JS object with all the expected method names.
                         jsContext.getBindings("js").putMember("__page__", safeProxy);
                         jsContext.getBindings("js").putMember("env", ProxyObject.fromMap(envVars));
                         jsContext.eval("js", JS_PAGE_WRAPPER);

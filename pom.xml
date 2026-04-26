@@ -20,7 +20,7 @@
         <dependency>
             <groupId>dev.zeann3th</groupId>
             <artifactId>stresspilot</artifactId>
-            <version>3.0.0</version>
+            <version>3.0.1</version>
             <scope>provided</scope>
         </dependency>
 
