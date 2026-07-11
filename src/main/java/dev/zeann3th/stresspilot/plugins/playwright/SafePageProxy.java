@@ -1,12 +1,19 @@
 package dev.zeann3th.stresspilot.plugins.playwright;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.UUID;
+
+import org.graalvm.polyglot.HostAccess;
+
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
-import org.graalvm.polyglot.HostAccess;
-
-import java.util.List;
-import java.util.Set;
+import com.microsoft.playwright.options.ScreenshotType;
 
 /**
  * An explicit, allowlisted wrapper around a Playwright Page.
@@ -16,9 +23,8 @@ public class SafePageProxy {
 
     private final Page page;
 
-    private static final int MAX_TEXT_LENGTH = 50_000;
-    private int navigationCount = 0;
-    private static final int MAX_NAVIGATIONS = 20;
+    private static final DateTimeFormatter SCREENSHOT_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS");
 
     public SafePageProxy(Page page) {
         this.page = page;
@@ -26,11 +32,6 @@ public class SafePageProxy {
 
     @HostAccess.Export
     public void gotoUrl(String url) {
-        if (navigationCount >= MAX_NAVIGATIONS) {
-            throw new SecurityException("Navigation limit reached (" + MAX_NAVIGATIONS + ")");
-        }
-        validateUrl(url);
-        navigationCount++;
         page.navigate(url);
     }
 
@@ -121,7 +122,7 @@ public class SafePageProxy {
 
     @HostAccess.Export
     public String content() {
-        return truncate(page.content());
+        return page.content();
     }
 
     @HostAccess.Export
@@ -150,6 +151,36 @@ public class SafePageProxy {
         locator(selector).fill(value);
     }
 
+    @HostAccess.Export
+    public void press(String selector, String key) {
+        locator(selector).press(key);
+    }
+
+    @HostAccess.Export
+    public void hover(String selector) {
+        locator(selector).hover();
+    }
+
+    @HostAccess.Export
+    public void dblclick(String selector) {
+        locator(selector).dblclick();
+    }
+
+    @HostAccess.Export
+    public void check(String selector) {
+        locator(selector).check();
+    }
+
+    @HostAccess.Export
+    public void uncheck(String selector) {
+        locator(selector).uncheck();
+    }
+
+    @HostAccess.Export
+    public void selectOption(String selector, String value) {
+        locator(selector).selectOption(value);
+    }
+
     // -------------------------------------------------------------------------
     // Waiting
     // -------------------------------------------------------------------------
@@ -161,9 +192,6 @@ public class SafePageProxy {
 
     @HostAccess.Export
     public void waitForTimeout(int milliseconds) {
-        if (milliseconds < 0 || milliseconds > 10_000) {
-            throw new SecurityException("waitForTimeout must be between 0 and 10000ms");
-        }
         page.waitForTimeout(milliseconds);
     }
 
@@ -174,32 +202,47 @@ public class SafePageProxy {
     }
 
     @HostAccess.Export
-    public String screenshot() {
-        byte[] buffer = page.screenshot(new Page.ScreenshotOptions()
-                .setType(com.microsoft.playwright.options.ScreenshotType.JPEG)
-                .setQuality(70));
-        return java.util.Base64.getEncoder().encodeToString(buffer);
+    public String screenshot(boolean fullPage, String type, int quality, String name) {
+        return saveScreenshot(page, fullPage, type, quality, name);
+    }
+
+    static String saveScreenshot(Page page, boolean fullPage, String type, int quality, String name) {
+        ScreenshotType screenshotType = "png".equalsIgnoreCase(type) ? ScreenshotType.PNG : ScreenshotType.JPEG;
+        Path output = nextScreenshotPath(screenshotType, name);
+        Page.ScreenshotOptions options = new Page.ScreenshotOptions()
+                .setFullPage(fullPage)
+                .setType(screenshotType)
+                .setPath(output);
+        if (screenshotType == ScreenshotType.JPEG) {
+            options.setQuality(Math.max(0, Math.min(100, quality)));
+        }
+        page.screenshot(options);
+        return output.toString();
+    }
+
+    private static Path nextScreenshotPath(ScreenshotType type, String name) {
+        Path directory = Path.of(System.getProperty("user.home"), "Pictures", "StressPilot");
+        try {
+            Files.createDirectories(directory);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot create screenshot directory " + directory, e);
+        }
+
+        String label = name == null || name.isBlank() ? "screenshot" : name;
+        label = label.replaceAll("[^a-zA-Z0-9._-]", "_").replaceAll("^\\.+", "");
+        if (label.isBlank()) label = "screenshot";
+        String extension = type == ScreenshotType.PNG ? "png" : "jpg";
+        String timestamp = SCREENSHOT_TIMESTAMP.format(LocalDateTime.now());
+        String unique = UUID.randomUUID().toString().substring(0, 8).toLowerCase(Locale.ROOT);
+        return directory.resolve(label + "_" + timestamp + "_" + unique + "." + extension).toAbsolutePath();
     }
 
     // -------------------------------------------------------------------------
     // Internal Validation
     // -------------------------------------------------------------------------
 
-    private void validateUrl(String url) {
-        if (url == null || url.isBlank()) throw new SecurityException("URL blank");
-        String lower = url.toLowerCase().trim();
-        if (lower.startsWith("javascript:") || lower.startsWith("data:") || lower.startsWith("file:")) {
-            throw new SecurityException("URL scheme not allowed");
-        }
-    }
-
     private void validateSelector(String selector) {
         if (selector == null || selector.isBlank()) throw new SecurityException("Selector blank");
-    }
-
-    private String truncate(String text) {
-        if (text == null) return null;
-        return text.length() > MAX_TEXT_LENGTH ? text.substring(0, MAX_TEXT_LENGTH) : text;
     }
 
     /**
@@ -229,7 +272,6 @@ public class SafePageProxy {
 
         @HostAccess.Export
         public void fill(String value) {
-            if (value != null && value.length() > 10_000) throw new SecurityException("Input too long");
             locator.first().fill(value);
         }
 
@@ -259,13 +301,28 @@ public class SafePageProxy {
         }
 
         @HostAccess.Export
+        public boolean isEnabled() {
+            return locator.first().isEnabled();
+        }
+
+        @HostAccess.Export
+        public boolean isChecked() {
+            return locator.first().isChecked();
+        }
+
+        @HostAccess.Export
+        public String inputValue() {
+            return locator.first().inputValue();
+        }
+
+        @HostAccess.Export
         public String textContent() {
-            return truncate(locator.first().textContent());
+            return locator.first().textContent();
         }
 
         @HostAccess.Export
         public String innerText() {
-            return truncate(locator.first().innerText());
+            return locator.first().innerText();
         }
 
         @HostAccess.Export
@@ -298,9 +355,31 @@ public class SafePageProxy {
             return new SafeLocatorProxy(locator.nth(index));
         }
 
-        private String truncate(String text) {
-            if (text == null) return null;
-            return text.length() > MAX_TEXT_LENGTH ? text.substring(0, MAX_TEXT_LENGTH) : text;
+        @HostAccess.Export
+        public SafeLocatorProxy locator(String selector) {
+            if (selector == null || selector.isBlank()) throw new SecurityException("Selector blank");
+            return new SafeLocatorProxy(locator.locator(selector));
         }
+
+        @HostAccess.Export
+        public SafeLocatorProxy getByText(String text) {
+            return new SafeLocatorProxy(locator.getByText(text));
+        }
+
+        @HostAccess.Export
+        public SafeLocatorProxy getByLabel(String text) {
+            return new SafeLocatorProxy(locator.getByLabel(text));
+        }
+
+        @HostAccess.Export
+        public SafeLocatorProxy getByPlaceholder(String text) {
+            return new SafeLocatorProxy(locator.getByPlaceholder(text));
+        }
+
+        @HostAccess.Export
+        public SafeLocatorProxy getByTestId(String testId) {
+            return new SafeLocatorProxy(locator.getByTestId(testId));
+        }
+
     }
 }

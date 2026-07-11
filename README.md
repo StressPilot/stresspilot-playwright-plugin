@@ -50,6 +50,44 @@ The plugin exposes a `page` object with the following methods:
 - `waitForTimeout(ms)`
 - `screenshot()`
 
+Action methods are synchronous and fluent, so old scripts still work and chains are also valid:
+
+```javascript
+page.goto(env.BASE_URL)
+    .waitForSelector("#login")
+    .fill("#username", "seeduser002")
+    .click("button[type=submit]");
+
+page.locator("form")
+    .getByPlaceholder("Password")
+    .fill("password123")
+    .press("Enter");
+```
+
+## Assertions and screenshots
+
+The sandbox provides lightweight synchronous Playwright-style assertions:
+
+```javascript
+expect(page.locator("h1")).toContainText("Dashboard");
+expect(page.getByTestId("ready")).toBeVisible();
+expect(page.locator(".row")).toHaveCount(3);
+expect(page.title()).toContain("StressPilot");
+
+const screenshotPath = page.screenshot({ fullPage: true });
+page.screenshot({ type: "jpeg", quality: 80, name: "home" });
+```
+
+Screenshots are written directly to the current operating-system user's
+`Pictures/StressPilot` folder. Filenames include the supplied name, a timestamp,
+and a collision-safe suffix. The method returns the absolute file path; image data
+is never returned as Base64. Failed scripts also save a timestamped `error` PNG in
+the same folder and expose its path as `env.errorScreenshot`.
+
+Supported locator assertions include `toBeVisible`, `toBeHidden`, `toBeEnabled`,
+`toBeChecked`, `toHaveText`, `toContainText`, `toHaveCount`, and `toHaveValue`.
+Generic assertions include `toBe`, `toEqual`, `toContain`, `toBeTruthy`, and `toBeFalsy`.
+
 ## Environment Variables
 
 You can access environment variables via the `env` object:

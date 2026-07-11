@@ -1,10 +1,28 @@
 package dev.zeann3th.stresspilot.plugins.playwright;
 
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.HostAccess;
+import org.graalvm.polyglot.PolyglotException;
+import org.graalvm.polyglot.io.IOAccess;
+import org.graalvm.polyglot.proxy.ProxyObject;
+import org.pf4j.Extension;
+import org.springframework.stereotype.Component;
+
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+
 import dev.zeann3th.stresspilot.core.domain.commands.endpoint.ExecuteEndpointResponse;
 import dev.zeann3th.stresspilot.core.domain.constants.Constants;
 import dev.zeann3th.stresspilot.core.domain.entities.EndpointEntity;
@@ -13,17 +31,6 @@ import dev.zeann3th.stresspilot.core.domain.exception.CommandExceptionBuilder;
 import dev.zeann3th.stresspilot.core.services.executors.EndpointExecutor;
 import dev.zeann3th.stresspilot.core.services.executors.context.ExecutionContext;
 import lombok.extern.slf4j.Slf4j;
-import org.graalvm.polyglot.Context;
-import org.graalvm.polyglot.HostAccess;
-import org.graalvm.polyglot.PolyglotException;
-import org.graalvm.polyglot.Value;
-import org.graalvm.polyglot.io.IOAccess;
-import org.graalvm.polyglot.proxy.ProxyObject;
-import org.pf4j.Extension;
-import org.springframework.stereotype.Component;
-
-import java.util.Map;
-import java.util.concurrent.*;
 
 @Slf4j
 @Extension
@@ -33,35 +40,44 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
     private static final String JS_PAGE_WRAPPER = """
             const wrapLocator = (loc) => {
                 if (!loc) return null;
-                return {
-                    click:           ()          => loc.click(),
-                    dblclick:        ()          => loc.dblclick(),
-                    hover:           ()          => loc.hover(),
-                    fill:            (val)       => loc.fill(val),
-                    press:           (key)       => loc.press(key),
-                    check:           ()          => loc.check(),
-                    uncheck:         ()          => loc.uncheck(),
-                    selectOption:    (val)       => loc.selectOption(val),
+                const api = {
+                    click:           ()          => { loc.click(); return api; },
+                    dblclick:        ()          => { loc.dblclick(); return api; },
+                    hover:           ()          => { loc.hover(); return api; },
+                    fill:            (val)       => { loc.fill(val); return api; },
+                    press:           (key)       => { loc.press(key); return api; },
+                    check:           ()          => { loc.check(); return api; },
+                    uncheck:         ()          => { loc.uncheck(); return api; },
+                    selectOption:    (val)       => { loc.selectOption(val); return api; },
                     isVisible:       ()          => loc.isVisible(),
+                    isEnabled:       ()          => loc.isEnabled(),
+                    isChecked:       ()          => loc.isChecked(),
+                    inputValue:      ()          => loc.inputValue(),
                     textContent:     ()          => loc.textContent(),
                     innerText:       ()          => loc.innerText(),
                     getAttribute:    (name)      => loc.getAttribute(name),
-                    waitFor:         ()          => loc.waitFor(),
+                    waitFor:         ()          => { loc.waitFor(); return api; },
                     count:           ()          => loc.count(),
                     first:           ()          => wrapLocator(loc.first()),
                     last:            ()          => wrapLocator(loc.last()),
                     nth:             (idx)       => wrapLocator(loc.nth(idx)),
+                    locator:         (sel)       => wrapLocator(loc.locator(sel)),
+                    getByText:       (text)      => wrapLocator(loc.getByText(text)),
+                    getByLabel:      (text)      => wrapLocator(loc.getByLabel(text)),
+                    getByPlaceholder:(text)      => wrapLocator(loc.getByPlaceholder(text)),
+                    getByTestId:     (id)        => wrapLocator(loc.getByTestId(id)),
                 };
+                return api;
             };
 
             const page = {
-                goto:            (url)       => __page__.gotoUrl(url),
-                navigate:        (url)       => __page__.gotoUrl(url),
+                goto:            (url)       => { __page__.gotoUrl(url); return page; },
+                navigate:        (url)       => { __page__.gotoUrl(url); return page; },
                 url:             ()          => __page__.url(),
                 title:           ()          => __page__.title(),
-                reload:          ()          => __page__.reload(),
-                goBack:          ()          => __page__.goBack(),
-                goForward:       ()          => __page__.goForward(),
+                reload:          ()          => { __page__.reload(); return page; },
+                goBack:          ()          => { __page__.goBack(); return page; },
+                goForward:       ()          => { __page__.goForward(); return page; },
                 
                 locator:         (sel)       => wrapLocator(__page__.locator(sel)),
                 getByRole:       (r, n)      => wrapLocator(__page__.getByRole(r, n)),
@@ -78,14 +94,44 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
                 getAttribute:    (sel, attr) => __page__.getAttribute(sel, attr),
                 isVisible:       (sel)       => __page__.isVisible(sel),
                 exists:          (sel)       => __page__.exists(sel),
-                click:           (sel)       => __page__.click(sel),
-                fill:            (sel, val)  => __page__.fill(sel, val),
+                click:           (sel)       => { __page__.click(sel); return page; },
+                dblclick:        (sel)       => { __page__.dblclick(sel); return page; },
+                hover:           (sel)       => { __page__.hover(sel); return page; },
+                fill:            (sel, val)  => { __page__.fill(sel, val); return page; },
+                press:           (sel, key)  => { __page__.press(sel, key); return page; },
+                check:           (sel)       => { __page__.check(sel); return page; },
+                uncheck:         (sel)       => { __page__.uncheck(sel); return page; },
+                selectOption:    (sel, val)  => { __page__.selectOption(sel, val); return page; },
                 
-                waitForSelector: (sel)       => __page__.waitForSelector(sel),
-                waitForTimeout:  (ms)        => __page__.waitForTimeout(ms),
-                waitForLoadState:(state)     => __page__.waitForLoadState(state),
-                screenshot:      ()          => __page__.screenshot(),
+                waitForSelector: (sel)       => { __page__.waitForSelector(sel); return page; },
+                waitForTimeout:  (ms)        => { __page__.waitForTimeout(ms); return page; },
+                waitForLoadState:(state='load') => { __page__.waitForLoadState(state); return page; },
+                screenshot:      (options={}) => {
+                    return __page__.screenshot(
+                        !!options.fullPage,
+                        options.type || 'png',
+                        options.quality ?? 80,
+                        options.name || 'screenshot'
+                    );
+                },
             };
+
+            const __assert = (ok, message) => { if (!ok) throw new Error('Assertion failed: ' + message); };
+            const expect = (actual) => ({
+                toBe:             (wanted) => __assert(actual === wanted, `${actual} !== ${wanted}`),
+                toEqual:          (wanted) => __assert(JSON.stringify(actual) === JSON.stringify(wanted), 'values differ'),
+                toContain:        (wanted) => __assert(actual != null && actual.includes(wanted), `${actual} does not contain ${wanted}`),
+                toBeTruthy:       ()       => __assert(!!actual, `${actual} is not truthy`),
+                toBeFalsy:        ()       => __assert(!actual, `${actual} is not falsy`),
+                toBeVisible:      ()       => __assert(actual.isVisible(), 'locator is not visible'),
+                toBeHidden:       ()       => __assert(!actual.isVisible(), 'locator is visible'),
+                toBeEnabled:      ()       => __assert(actual.isEnabled(), 'locator is disabled'),
+                toBeChecked:      ()       => __assert(actual.isChecked(), 'locator is not checked'),
+                toHaveText:       (wanted) => __assert(actual.innerText() === wanted, `text is '${actual.innerText()}', expected '${wanted}'`),
+                toContainText:    (wanted) => __assert(actual.innerText().includes(wanted), `text does not contain '${wanted}'`),
+                toHaveCount:      (wanted) => __assert(actual.count() === wanted, `count is ${actual.count()}, expected ${wanted}`),
+                toHaveValue:      (wanted) => __assert(actual.inputValue() === wanted, `value is '${actual.inputValue()}', expected '${wanted}'`),
+            });
             """;
 
     @Override
@@ -202,10 +248,8 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
     private void captureErrorScreenshot(Page page, Map<String, Object> envVars) {
         try {
             log.warn("Playwright script failed. Capturing crash screenshot...");
-            byte[] buffer = page.screenshot(new Page.ScreenshotOptions()
-                    .setType(com.microsoft.playwright.options.ScreenshotType.JPEG)
-                    .setQuality(70));
-            envVars.put("errorScreenshot", java.util.Base64.getEncoder().encodeToString(buffer));
+            String path = SafePageProxy.saveScreenshot(page, true, "png", 80, "error");
+            envVars.put("errorScreenshot", path);
         } catch (Exception screenshotEx) {
             log.error("Failed to capture screenshot during crash", screenshotEx);
         }
