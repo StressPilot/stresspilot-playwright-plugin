@@ -198,7 +198,7 @@ public class PlaywrightEndpointExecutor implements EndpointExecutor {
             Callable<Void> browserTask = () -> {
                 try (Playwright playwright = Playwright.create();
                      Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                             .setHeadless(true)); // Headless by default for load testing
+                             .setHeadless(false)); // Headless by default for load testing
                      BrowserContext browserContext = browser.newContext();
                      Page page = browserContext.newPage()) {
 
